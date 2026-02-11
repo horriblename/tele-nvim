@@ -1,7 +1,7 @@
 local M = {}
 
 ---@class tele.AttachParentOpt
----@field wait boolean if false, exit client nvim session immediately after successfully attaching to parent. Analogous to --remote-wait (default false)
+---@field wait boolean if false, exit client nvim session immediately after successfully attaching to parent. Analogous to --remote-wait (default true)
 
 local defaultAttachParentOpt = {
 	wait = true,
@@ -76,7 +76,7 @@ end
 ---@param opt tele.AttachParentOpt?
 ---@return boolean attached_parent, string? error
 function M.try_attach_parent(opt)
-	opt = vim.tbl_deep_extend("force", defaultAttachParentOpt, opt)
+	opt = vim.tbl_deep_extend("force", defaultAttachParentOpt, opt or {})
 	local args = { unpack(vim.v.argv, 2) }
 	local addr = vim.env.NVIM or os.getenv("NVIM_LISTEN_ADDRESS")
 	if not addr or addr == "" then
@@ -94,12 +94,16 @@ function M.try_attach_parent(opt)
 	end
 	local client_sock = vim.v.servername
 
-	vim.cmd('%argdelete') -- clear args as it may prevent clean shutdown
+	vim.cmd('0,$argdelete') -- clear args as it may prevent clean shutdown
 	-- TODO: support tcp socket?
 	local sanitized_args = sanitize_args_for_call(args)
-	vim.print("sanitized", sanitized_args)
 	vim.rpcrequest(chan, "nvim_exec_lua", "require('tele').parent_open_files(...)",
 		{ "pipe", client_sock, unpack(sanitized_args) })
+	if opt.wait then
+		vim.notify("tele-nvim: waiting for parent session to close files")
+	else
+		os.exit(0)
+	end
 	return true
 end
 
@@ -131,6 +135,19 @@ function M.parent_open_files(sock_mode, child_sock, ...)
 		on_parent_done(child_chan)
 		return
 	elseif nfiles == 1 then
+		local win_conf = vim.api.nvim_win_get_config(0)
+		-- we are in a floating win
+		if win_conf.relative ~= "" then
+			vim.api.nvim_open_win(0, true, {
+				relative = "win",
+				row = 0,
+				col = 0,
+				width = win_conf.width,
+				height = win_conf.height,
+			})
+		else
+			vim.cmd("split")
+		end
 		vim.cmd.edit(unpack(cli_args.files))
 		if cli_args.diff then
 			vim.cmd("diffthis")
@@ -138,9 +155,6 @@ function M.parent_open_files(sock_mode, child_sock, ...)
 		for _, cmd in ipairs(cli_args.commands) do
 			vim.cmd(cmd)
 		end
-		vim.keymap.set('n', 'ZZ', ':w | edit #<CR>', {
-			buffer = true,
-		})
 	else
 		vim.cmd.tabnew()
 		vim.cmd.args(unpack(cli_args.files))
@@ -158,6 +172,9 @@ function M.parent_open_files(sock_mode, child_sock, ...)
 	local bufs = vim.iter(cli_args.files):map(vim.fn.bufnr):totable()
 
 	for _, buf in ipairs(bufs) do
+		-- TODO: not reliable: if buffer is open in another window, this will close that one.
+		-- Probably better to set winfixbuf and watch for window close (still need to handle buffer switching since
+		-- :edit! file ignores winfixbuf)
 		vim.bo[buf].bufhidden = "wipe"
 		vim.api.nvim_create_autocmd("BufWipeout", {
 			group = group,
