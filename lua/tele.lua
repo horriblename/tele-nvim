@@ -66,7 +66,6 @@ local function parse_cli_flags(args)
 		elseif arg:find("^%+") then
 			table.insert(res.commands, arg:sub(2))
 		else
-			print('parsed file:', arg)
 			table.insert(res.files, arg)
 		end
 	end
@@ -100,6 +99,12 @@ function M.try_attach_parent(opt)
 	vim.rpcrequest(chan, "nvim_exec_lua", "require('tele').parent_open_files(...)",
 		{ "pipe", client_sock, unpack(sanitized_args) })
 	if opt.wait then
+		vim.cmd [[
+			enew!
+			setlocal buftype=nofile wrap
+			normal iFile is being edited in the parent nvim session. Close that window to proceed.
+			setlocal nomodifiable
+		]]
 		vim.notify("tele-nvim: waiting for parent session to close files")
 	else
 		os.exit(0)
@@ -120,7 +125,7 @@ local function list_index(list, item)
 end
 
 local function on_parent_done(child_chan)
-	vim.rpcnotify(child_chan, "nvim_command", "quit")
+	vim.rpcnotify(child_chan, "nvim_command", "quitall")
 	vim.fn.chanclose(child_chan)
 end
 
