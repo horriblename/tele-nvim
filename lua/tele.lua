@@ -141,6 +141,9 @@ function M.parent_open_files(sock_mode, child_sock, ...)
 	local cli_args = parse_cli_flags({ ... })
 	local nfiles = #cli_args.files
 	if nfiles == 0 then
+		for _, cmd in ipairs(cli_args.commands) do
+			vim.cmd(cmd)
+		end
 		on_parent_done(child_chan)
 		return
 	elseif nfiles == 1 then
