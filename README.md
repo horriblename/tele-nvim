@@ -1,6 +1,6 @@
 # tele-nvim
 
-Nested nvim sessions will instead open files in the parent session
+Open files in the parent session instead of a nested `:terminal` nvim session
 
 Tested on nvim v0.11.5
 
