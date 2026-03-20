@@ -27,10 +27,8 @@ The following section presents a few common usages of tele-nvim.
 
 <details>
 <summary>
-
 Explicitly opening files in parent session and wait for user exit (like vim
-`--remote-wait`)
-
+--remote-wait)
 </summary>
 
 nvim +TeleRemoteWait file.txt
@@ -39,6 +37,8 @@ nvim +TeleRemoteWait file.txt
 
 <details>
 <summary>Automatically open files in parent session</summary>
+
+## Automatically open files in parent session
 
 Add this to the start of you init.lua:
 
