@@ -25,22 +25,20 @@ command to open files in the parent nvim session.
 
 The following section presents a few common usages of tele-nvim.
 
-<summary>
 <details>
+<summary>
 
 Explicitly opening files in parent session and wait for user exit (like vim
 `--remote-wait`)
 
-</details>
+</summary>
 
 nvim +TeleRemoteWait file.txt
 
-</summary>
+</details>
 
-<summary>
-<details>Automatically open files in parent session</details>
-
-## Automatically open files in parent session
+<details>
+<summary>Automatically open files in parent session</summary>
 
 Add this to the start of you init.lua:
 
@@ -62,7 +60,7 @@ end
 Now open `nvim file.txt` in a nested terminal session, the file will be opened
 in the parent session instead. Close the window
 
-</summary>
+</details>
 
 ## Similar plugins
 
