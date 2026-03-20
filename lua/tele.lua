@@ -41,6 +41,8 @@ local function sanitize_args_for_call(args)
 				table.insert(filtered, vim.fn.fnamemodify(args[j], ":p"))
 			end
 			break
+		elseif arg:find("^%+Tele") then
+			-- ignore :Tele* commands
 		elseif arg:find("^%+") or arg == "-d" then
 			table.insert(filtered, arg)
 		elseif not arg:match("^%-") then
