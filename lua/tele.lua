@@ -125,8 +125,12 @@ local function list_index(list, item)
 end
 
 local function on_parent_done(child_chan)
-	vim.rpcnotify(child_chan, "nvim_command", "quitall")
-	vim.fn.chanclose(child_chan)
+	pcall(function()
+		vim.rpcnotify(child_chan, "nvim_command", "quitall")
+		vim.fn.chanclose(child_chan)
+	end)
+	-- TODO: errors are probably due to nested nvim being closed first,
+	-- usually harmless, but I should check somehow
 end
 
 function M.parent_open_files(sock_mode, child_sock, ...)
