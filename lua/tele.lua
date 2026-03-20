@@ -106,6 +106,7 @@ function M.try_attach_parent(opt)
 			setlocal buftype=nofile wrap
 			normal iFile is being edited in the parent nvim session. Close that window to proceed.
 			setlocal nomodifiable
+			silent wincmd o
 		]]
 		vim.notify("tele-nvim: waiting for parent session to close files")
 	else
@@ -155,12 +156,15 @@ function M.parent_open_files(sock_mode, child_sock, ...)
 			vim.api.nvim_open_win(0, true, {
 				relative = "win",
 				row = 0,
-				col = 0,
+				col = 1,
 				width = win_conf.width,
 				height = win_conf.height,
+				title = vim.fn.fnamemodify(cli_args.files[1], ":."),
+				border = 'rounded',
 			})
 		else
-			vim.cmd("split")
+			local h = vim.fn.winheight(0)
+			vim.cmd(h - 1 .. "split")
 		end
 		vim.cmd.edit(unpack(cli_args.files))
 		if cli_args.diff then
