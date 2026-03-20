@@ -7,8 +7,8 @@ Tested on nvim v0.11.5
 ## Features
 
 - Mimics behavior of Vim's `--remote-wait`, `--remote-tab-wait` (somewhat)
-- Automatically open files in parent session with
-  `require('tele').try_attach_parent()`
+- Automatically open files in parent session with no extra CLI flags (with
+  [some setup](#automatically-open-files-in-parent-session))
 
 ## Non-goals
 
@@ -26,7 +26,12 @@ command to open files in the parent nvim session.
 The following section presents a few common usages of tele-nvim.
 
 <summary>
-<details>Explicitly opening files in parent session and wait for user exit (like vim --remote-wait)</details>
+<details>
+
+Explicitly opening files in parent session and wait for user exit (like vim
+`--remote-wait`)
+
+</details>
 
 nvim +TeleRemoteWait file.txt
 
@@ -34,6 +39,8 @@ nvim +TeleRemoteWait file.txt
 
 <summary>
 <details>Automatically open files in parent session</details>
+
+## Automatically open files in parent session
 
 Add this to the start of you init.lua:
 
