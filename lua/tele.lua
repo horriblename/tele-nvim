@@ -178,7 +178,9 @@ function M.parent_open_files(sock_mode, child_sock, ...)
 		vim.cmd.args(unpack(cli_args.files))
 		vim.cmd('vertical all')
 		if cli_args.diff then
-			vim.cmd("windo diffthis")
+			for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+				vim.fn.win_execute(win, "diffthis", true)
+			end
 		end
 		for _, cmd in ipairs(cli_args.commands) do
 			vim.cmd(cmd)
