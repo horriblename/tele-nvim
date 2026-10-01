@@ -1,0 +1,39 @@
+*tele-nvim.txt*
+
+Tele-nvim
+
+See ../README.md for basic usage. This file only documents more advanced
+features.
+
+==============================================================================
+tele-nvim Autocommand Events                                     *tele-events*
+
+Tele-nvim provides |User| autocommand events, which can be used like so:
+
+>lua
+    vim.api.nvim_create_autocmd("User", {
+        pattern = "TeleClosedAll",
+        callback = function(ev)
+            print("closed all files for", ev.data.child_channel)
+        end,
+    }
+<
+
+                                                                  *TeleOpened*
+
+Triggered on the parent session when a child requests file(s) to be opened.
+Only triggered once for child that requests multiple files, after opening all
+of them, and running any commands (|--cmd|, |-c|).
+
+The |event-data| is set to a table with the following values:
+
+  - {child_channel} An integer representing the |channel| of the child
+    session.
+
+                                                               *TeleClosedAll*
+
+Triggered on the parent session, when all corresponding windows are closed in
+the parent session. Triggered once per child session.
+
+The |event-data| is same as |TeleOpened|, but, child_channel is already closed
+and may not be used.

@@ -39,6 +39,13 @@ local function on_parent_done(child_chan)
 	end)
 	-- TODO: errors are probably due to nested nvim being closed first,
 	-- usually harmless, but I should check somehow
+
+	vim.api.nvim_exec_autocmds("User", {
+		pattern = "TeleClosedAll",
+		data = {
+			child_channel = child_chan,
+		},
+	})
 end
 
 function M.parent_open_files(sock_mode, child_sock, ...)
@@ -120,6 +127,14 @@ function M.parent_open_files(sock_mode, child_sock, ...)
 			end
 		})
 	end
+
+	vim.api.nvim_exec_autocmds("User", {
+		pattern = "TeleOpened",
+		data = {
+			child_channel = child_chan,
+		},
+	})
 end
 
 return M
+
