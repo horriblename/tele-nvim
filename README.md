@@ -10,7 +10,7 @@ Tested on nvim v0.11.5
 - Automatically open files in parent session with no extra CLI flags (with
   [some setup](#automatically-open-files-in-parent-session))
 
-## Non-goals
+## Non-Goals
 
 - Managing a "global" nvim session. tele-nvim uses the $NVIM environment
   variable and does not attempt to look for sessions anywhere else. In other
@@ -25,15 +25,15 @@ command to open files in the parent nvim session.
 
 The following section presents a few common usages of tele-nvim.
 
-### Explicitly opening files in parent session and wait for user exit (like vim `--remote-wait`)
+### Explicitly Opening Files in Parent Session and Wait for User Exit (like Vim `--remote-wait`)
 
 ```shell
 nvim +TeleRemoteWait file.txt
 ```
 
-### Automatically open files in parent session
+### Automatically Open Files in Parent Session
 
-Add this to the start of you init.lua:
+Add this to the start of you `init.lua`:
 
 ```lua
 -- This tries to open arguments supplied in the parent session
@@ -54,7 +54,7 @@ Now open `nvim file.txt` in a nested terminal session, the file will be opened
 in the parent session instead. Closing the window in the parent session also
 closes the nested nvim session.
 
-## Similar plugins
+## Similar Plugins
 
 - [neovim-remote]: written in python and must be invoked manually with the `nvr`
   command.
