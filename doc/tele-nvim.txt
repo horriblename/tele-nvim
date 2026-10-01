@@ -2,8 +2,34 @@
 
 Tele-nvim
 
-See ../README.md for basic usage. This file only documents more advanced
-features.
+See ../README.md for basic usage.
+
+==============================================================================
+Commands
+
+                                                             *:TeleRemoteWait*
+
+From a child session, open a file in the parent session, then wait until the
+parent session closes the file, before quiting the child session.
+
+This command reads directly from |v:argv| so it does not take any arguments.
+
+==============================================================================
+Lua API                                                             *tele-api*
+
+                                                    *tele.try_attach_parent()*
+
+Try to attach to a parent session, by checking |$NVIM|.
+
+Flags and default values:
+
+>lua
+    require("tele").try_attach_parent({
+        -- if false, exit child session immediately after successfully
+        -- attaching to the parent
+        wait = true,
+    })
+<
 
 ==============================================================================
 tele-nvim Autocommand Events                                     *tele-events*
