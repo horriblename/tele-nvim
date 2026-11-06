@@ -54,6 +54,28 @@ local function sanitize_args_for_call(args)
 	return filtered
 end
 
+---Currently only supports files, "+cmd", and "--" for passing rest of args as literal files
+---@param args string[]
+---@return {commands: string[], files: string[], diff: boolean}
+local function parse_cli_flags(args)
+	local res = { commands = {}, files = {}, diff = false }
+	for i, arg in ipairs(args) do
+		if arg == "--" then
+			vim.list_extend(res.files, args, i + 1)
+			break
+		elseif arg == "-d" then
+			res.diff = true
+		elseif arg:find("^%+") then
+			table.insert(res.commands, arg:sub(2))
+		else
+			table.insert(res.files, arg)
+		end
+	end
+	return res
+end
+
+M.parse_cli_flags = parse_cli_flags
+
 ---@param opt tele.AttachParentOpt?
 ---@return boolean attached_parent, string? error
 function M.try_attach_parent(opt)
@@ -78,8 +100,9 @@ function M.try_attach_parent(opt)
 	vim.cmd('0,$argdelete') -- clear args as it may prevent clean shutdown
 	-- TODO: support tcp socket?
 	local sanitized_args = sanitize_args_for_call(args)
+	local cli_args = parse_cli_flags(sanitized_args)
 	vim.rpcrequest(chan, "nvim_exec_lua", "require('tele.parent').parent_open_files(...)",
-		{ "pipe", client_sock, unpack(sanitized_args) })
+		{ "pipe", client_sock, cli_args })
 	if opt.wait then
 		vim.cmd [[
 			enew!

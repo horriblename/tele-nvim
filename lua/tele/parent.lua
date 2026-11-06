@@ -1,25 +1,5 @@
 local M = {}
 
----Currently only supports files, "+cmd", and "--" for passing rest of args as literal files
----@param args string[]
----@return {commands: string[], files: string[], diff: boolean}
-local function parse_cli_flags(args)
-	local res = { commands = {}, files = {}, diff = false }
-	for i, arg in ipairs(args) do
-		if arg == "--" then
-			vim.list_extend(res.files, args, i + 1)
-			break
-		elseif arg == "-d" then
-			res.diff = true
-		elseif arg:find("^%+") then
-			table.insert(res.commands, arg:sub(2))
-		else
-			table.insert(res.files, arg)
-		end
-	end
-	return res
-end
-
 ---@generic T
 ---@param list T[]
 ---@param item T
@@ -48,12 +28,11 @@ local function on_parent_done(child_chan)
 	})
 end
 
-function M.parent_open_files(sock_mode, child_sock, ...)
+function M.parent_open_files(sock_mode, child_sock, cli_args)
 	local child_chan = vim.fn.sockconnect(sock_mode, child_sock, { rpc = true })
 	if child_chan == 0 then
 		error("could not connect to child socket " .. child_sock)
 	end
-	local cli_args = parse_cli_flags({ ... })
 	local nfiles = #cli_args.files
 	if nfiles == 0 then
 		for _, cmd in ipairs(cli_args.commands) do
