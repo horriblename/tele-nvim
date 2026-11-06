@@ -67,7 +67,7 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 		table.insert(files, stdin_tempfile)
 	end
 
-	---@type string?
+	---@type integer?
 	local stdin_bufnr
 	local nfiles = #files
 	if nfiles == 0 then
@@ -161,6 +161,7 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 		pattern = "TeleOpened",
 		data = {
 			child_channel = child_chan,
+			bufs = bufs,
 		},
 	})
 end

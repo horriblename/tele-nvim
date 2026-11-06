@@ -55,11 +55,12 @@ The |event-data| is set to a table with the following values:
 
   - {child_channel} An integer representing the |channel| of the child
     session.
+  - {bufs} List of bufnr that were opened.
 
                                                                *TeleClosedAll*
 
 Triggered on the parent session, when all corresponding windows are closed in
 the parent session. Triggered once per child session.
 
-The |event-data| is same as |TeleOpened|, but, child_channel is already closed
-and may not be used.
+The |event-data| is passed `child_channel` (see |TeleOpened|), but,
+child_channel is already closed and may not be used.
