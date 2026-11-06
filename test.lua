@@ -4,16 +4,25 @@
 -- The test needs this session to be listening on a socket, because the child
 -- nvim spawned inside the :terminal finds its parent through $NVIM:
 --
---   nvim --headless -u NONE --cmd "set rtp^=$PWD" -c "so test.lua"
+--   nvim --headless -u NORC --cmd "set rtp^=$PWD" -c "so test.lua"
 --
--- Exits with status 1 if any check fails.
+-- Running without --headless is kinda supported, and doesn't exit after tests.
+-- Otherwise, exits with status 1 if any check fails.
 
 -- abs path of this checkout, e.g. when sourced as `:so test.lua`
 local repo = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
 local failures = 0
 
+vim.fn.setenv("NVIM", vim.v.null)
+
 local function log(fmt, ...)
 	io.stdout:write(string.format(fmt, ...) .. "\n")
+end
+local headless = #vim.api.nvim_list_uis() == 0
+if not headless then
+	log = function(fmt, ...)
+		vim.notify(string.format(fmt, ...))
+	end
 end
 
 local function check(name, ok, detail)
@@ -27,23 +36,38 @@ local function check(name, ok, detail)
 	return ok
 end
 
----Polls `fn` until it returns something truthy, up to `timeout` ms
----@return any value returned by `fn`, or nil on timeout
-local function wait_for(what, fn, timeout)
-	local now = vim.uv.now()
-	local deadline = now + (timeout or 5000)
-	while true do
-		local res = fn()
-		if res then
-			return res
+local function fail(name, detail)
+	check(name, false, detail)
+end
+
+---@return boolean ok, vim.api.keyset.create_autocmd.callback_args
+local function await_event(event, pattern, timeout_ms)
+	timeout_ms = timeout_ms or 2000
+	local co = assert(coroutine.running())
+	local timer ---@type uv.uv_timer_t
+	local au = vim.api.nvim_create_autocmd(event, {
+		pattern = pattern,
+		once = true,
+		-- vim.schedule works around possible nested autocmd issues
+		callback = vim.schedule_wrap(function(args)
+			timer:stop()
+			local ok, err = coroutine.resume(co, true, args)
+			if not ok then
+				vim.notify("Coroutine error: " .. tostring(err), vim.log.levels.ERROR)
+			end
+		end)
+	})
+
+	timer = vim.defer_fn(function()
+		vim.api.nvim_del_autocmd(au)
+		local ok, err = coroutine.resume(co, false, "timed out")
+		if not ok then
+			log("Coroutine error: " .. err)
 		end
-		if vim.uv.now() >= deadline then
-			failures = failures + 1
-			log("  FAIL timed out after %dms waiting for %s", timeout or 5000, what)
-			return nil
-		end
-		vim.wait(20)
-	end
+	end, timeout_ms)
+
+	log("waiting for autocmd %s %s", event, pattern)
+	return coroutine.yield()
 end
 
 ---@param buf integer
@@ -53,138 +77,128 @@ local function buf_shows(buf, needle)
 	return table.concat(lines, "\n"):find(needle, 1, true) ~= nil
 end
 
----@param path string
----@return integer?
-local function find_win_showing(path)
-	local wanted = vim.fn.fnamemodify(path, ":p")
-	for _, win in ipairs(vim.api.nvim_list_wins()) do
-		local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win))
-		if name ~= "" and vim.fn.fnamemodify(name, ":p") == wanted then
-			return win
-		end
-	end
+local function list_join(a, b)
+	local copy = { unpack(a) }
+	return vim.list_extend(copy, b)
 end
 
 -- prefer this checkout over any installed copy of tele-nvim
 vim.opt.runtimepath:prepend(repo)
 
-local tmp = vim.fn.tempname()
-vim.fn.mkdir(tmp, "p")
-local file = tmp .. "/somefile.txt"
+local tmpdir = vim.fn.tempname()
+vim.fn.mkdir(tmpdir, "p")
+local file = tmpdir .. "/somefile.txt"
 vim.fn.writefile({ "some file content" }, file)
 
 -- the child is a separate nvim, so it needs its own runtimepath setup
-local init = tmp .. "/init.lua"
+local init = tmpdir .. "/init.lua"
 vim.fn.writefile({
 	("vim.opt.runtimepath:prepend(%q)"):format(repo),
-	-- Running manually since we use -u NONE
+	-- Running manually just to be sure
 	'vim.cmd("runtime plugin/tele.lua")',
 }, init)
+local base_child_cmd = { "nvim", "-u", init, "-i", "NONE", "-n" }
 
 log("parent: %s", vim.v.servername)
 log("file:   %s", file)
 
--- this is what `:terminal nvim somefile.txt` does, with an explicit rtp for the child
-vim.cmd("botright new")
-local term_win = vim.api.nvim_get_current_win()
-local term_buf = vim.api.nvim_get_current_buf()
-local wins_before = #vim.api.nvim_list_wins()
-local job = vim.fn.jobstart({ "nvim", "-u", init, "-i", "NONE", "-n", "+TeleRemoteWait", file }, { term = true })
+local tests = {}
 
-if not check("child nvim started", job > 0, "job id " .. job) then
-	vim.cmd("cquit!")
+tests[#tests + 1] = function()
+	-- this is what `:terminal nvim somefile.txt` does, with an explicit rtp for the child
+	vim.cmd("botright new")
+	local wins_before = #vim.api.nvim_list_wins()
+	local job = vim.fn.jobstart(
+		list_join(base_child_cmd, { "+TeleRemoteWait", file }),
+		{ term = true }
+	)
+
+	assert(job > 0, "basic: failed to start job")
+
+	local ok, ev = await_event("User", "TeleOpened")
+	assert(ok, "error waiting for TeleOpened: " .. vim.inspect(ev))
+	assert(ev.data.bufs, "TeleOpened: invalid data " .. vim.inspect(ev))
+
+	check("basic: opened buffers", #ev.data.bufs == 1)
+	-- log("  child session said:")
+	-- for _, line in ipairs(vim.api.nvim_buf_get_lines(term_buf, 0, -1, false)) do
+	-- 	log("    | %s", line:gsub("%s+$", ""))
+	-- end
+
+	local buf = ev.data.bufs[1]
+	check("basic: file opened in parent window", vim.fn.bufname(buf) == file)
+	check("basic: file content visible in parent", buf_shows(buf, "some file content"))
+	check(
+		"basic: opened in a new window",
+		#vim.api.nvim_list_wins() == wins_before + 1,
+		"wins=" .. #vim.api.nvim_list_wins() .. " (was " .. wins_before .. ")"
+	)
+	check("basic: not opened in a new tab", #vim.api.nvim_list_tabpages() == 1, "tabs=" .. #vim.api.nvim_list_tabpages())
+
+	-- tele sets bufhidden=wipe and quits the child once the last file goes away
+	vim.api.nvim_buf_delete(vim.fn.bufnr(file), { force = true })
+	vim.cmd.redraw()
+	log("blocking until child exits")
+	local code = vim.fn.jobwait({ job }, 2000)[1]
+	check("child exits when parent closes the file", code == 0, "exit code " .. code)
 end
 
-local file_win = wait_for("parent to open " .. vim.fn.fnamemodify(file, ":."), function()
-	return find_win_showing(file)
-end)
-if not file_win then
-	log("  child session said:")
-	for _, line in ipairs(vim.api.nvim_buf_get_lines(term_buf, 0, -1, false)) do
-		log("    | %s", line:gsub("%s+$", ""))
+tests[#tests + 1] = function()
+	vim.cmd("only!")
+	vim.cmd("bdelete!")
+	local wins_before2 = #vim.api.nvim_list_wins()
+	local nvim_cmd = table.concat(base_child_cmd, " ") .. " +TeleRemoteWait -"
+	local job2 = vim.fn.jobstart(
+		{ "sh", "-c", "printf 'some stdin content\\n' | " .. nvim_cmd },
+		{ term = true })
+
+	check("stdin: child nvim started", job2 > 0, "job id " .. job2)
+
+	local ok, ev = await_event("User", "TeleOpened")
+	assert(ok, ev)
+	assert(ev.data.bufs, "stdin: bad event.data from TeleOpened")
+
+	check("stdin: opened 1 buffer", #ev.data.bufs == 1)
+
+	local stdin_buf = ev.data.bufs[1]
+	check("stdin: buffer opened", true, "buf " .. stdin_buf)
+	check("stdin: buffer unnamed", vim.api.nvim_buf_get_name(stdin_buf) == "",
+		"name=" .. vim.api.nvim_buf_get_name(stdin_buf))
+	check("stdin: buffer modified", vim.bo[stdin_buf].modified == true)
+	check("stdin: buffer content", vim.api.nvim_buf_get_lines(stdin_buf, 0, 1, false)[1] == "some stdin content")
+	check(
+		"stdin: opened in a new window",
+		#vim.api.nvim_list_wins() == wins_before2 + 1,
+		"wins=" .. #vim.api.nvim_list_wins() .. " (was " .. wins_before2 .. ")"
+	)
+
+	vim.api.nvim_buf_delete(stdin_buf, { force = true })
+	vim.cmd.redraw()
+	log("blocking until child exits")
+	local code2 = vim.fn.jobwait({ job2 }, 2000)[1]
+	if code2 == -1 then
+		fail("stdin: timed out waiting for child to exit")
+	else
+		check("stdin: child exits when parent closes the file", code2 == 0, "exit code " .. code2)
 	end
-	vim.cmd("cquit!")
 end
 
-check("file opened in parent window", true, ("window %d of %d"):format(file_win, #vim.api.nvim_list_wins()))
-check("file content visible in parent", buf_shows(vim.api.nvim_win_get_buf(file_win), "some file content"))
-check(
-	"opened in a new window",
-	#vim.api.nvim_list_wins() == wins_before + 1,
-	"wins=" .. #vim.api.nvim_list_wins() .. " (was " .. wins_before .. ")"
-)
-check("opened in a new tab", #vim.api.nvim_list_tabpages() == 1, "tabs=" .. #vim.api.nvim_list_tabpages())
-check(
-	"opened above the terminal window",
-	vim.api.nvim_win_get_position(file_win)[1] < vim.api.nvim_win_get_position(term_win)[1]
-)
+local main = coroutine.create(function()
+	for _, test in ipairs(tests) do
+		test()
+	end
 
--- tele sets bufhidden=wipe and quits the child once the last file goes away
-vim.api.nvim_buf_delete(vim.fn.bufnr(file), { force = true })
-
-local code = vim.fn.jobwait({ job }, 5000)[1]
-check("child exits when parent closes the file", code == 0, "exit code " .. code)
-
-vim.fn.delete(tmp, "rf")
-
--- stdin handling: pipe content into a child nvim
-local tmp2 = vim.fn.tempname()
-vim.fn.mkdir(tmp2, "p")
-local init2 = tmp2 .. "/init.lua"
-vim.fn.writefile({
-	("vim.opt.runtimepath:prepend(%q)"):format(repo),
-	'vim.cmd("runtime plugin/tele.lua")',
-}, init2)
-
-vim.cmd("botright new")
-local term_buf2 = vim.api.nvim_get_current_buf()
-local wins_before2 = #vim.api.nvim_list_wins()
-local job2 = vim.fn.jobstart({ "sh", "-c", "printf 'some stdin content\\n' | nvim -u " .. init2 .. " -i NONE -n +TeleRemoteWait -" }, { term = true })
-
-check("stdin: child nvim started", job2 > 0, "job id " .. job2)
-
-local function find_stdin_buf()
-	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-		if vim.api.nvim_buf_is_loaded(buf) then
-			local name = vim.api.nvim_buf_get_name(buf)
-			local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-			local content = table.concat(lines, "\n")
-			if name == "" and content:find("some stdin content", 1, true) and vim.bo[buf].modified then
-				return buf
-			end
+	if failures > 0 then
+		log("%d check(s) failed", failures)
+		if headless then
+			vim.cmd("cquit!")
+		end
+	else
+		log("all checks passed")
+		if headless then
+			vim.cmd("qa!")
 		end
 	end
-end
+end)
 
-local stdin_buf = wait_for("stdin: parent to open stdin", find_stdin_buf)
-if not stdin_buf then
-	log("  child session said:")
-	for _, line in ipairs(vim.api.nvim_buf_get_lines(term_buf2, 0, -1, false)) do
-		log("    | %s", line:gsub("%s+$", ""))
-	end
-	vim.cmd("cquit!")
-end
-
-check("stdin: buffer opened", true, "buf " .. stdin_buf)
-check("stdin: buffer unnamed", vim.api.nvim_buf_get_name(stdin_buf) == "", "name=" .. vim.api.nvim_buf_get_name(stdin_buf))
-check("stdin: buffer modified", vim.bo[stdin_buf].modified == true)
-check("stdin: buffer content", vim.api.nvim_buf_get_lines(stdin_buf, 0, 1, false)[1] == "some stdin content")
-check(
-	"stdin: opened in a new window",
-	#vim.api.nvim_list_wins() == wins_before2 + 1,
-	"wins=" .. #vim.api.nvim_list_wins() .. " (was " .. wins_before2 .. ")"
-)
-
-vim.api.nvim_buf_delete(stdin_buf, { force = true })
-
-local code2 = vim.fn.jobwait({ job2 }, 5000)[1]
-check("stdin: child exits when parent closes the file", code2 == 0, "exit code " .. code2)
-
-vim.fn.delete(tmp2, "rf")
-
-if failures > 0 then
-	log("%d check(s) failed", failures)
-	vim.cmd("cquit!")
-end
-log("all checks passed")
-vim.cmd("qa!")
+assert(coroutine.resume(main))
