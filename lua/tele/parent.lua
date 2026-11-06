@@ -13,12 +13,15 @@ local function list_index(list, item)
 end
 
 ---@param stdin_tempfile  string
+---@return integer? bufnr
 local function configure_stdin_buf(stdin_tempfile)
 	local buf = vim.fn.bufnr(stdin_tempfile)
 	if buf ~= -1 then
 		vim.api.nvim_buf_set_name(buf, "")
 		vim.bo[buf].modified = true
+		return buf
 	end
+	return nil
 end
 
 local function on_parent_done(child_chan)
@@ -64,6 +67,8 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 		table.insert(files, stdin_tempfile)
 	end
 
+	---@type string?
+	local stdin_bufnr
 	local nfiles = #files
 	if nfiles == 0 then
 		for _, cmd in ipairs(cli_args.commands) do
@@ -92,7 +97,7 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 		end
 		vim.cmd.edit(unpack(files))
 		if stdin_tempfile then
-			configure_stdin_buf(stdin_tempfile)
+			stdin_bufnr = configure_stdin_buf(stdin_tempfile)
 		end
 		if cli_args.diff then
 			vim.cmd("diffthis")
@@ -104,7 +109,7 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 		vim.cmd.tabnew()
 		vim.cmd.args(unpack(files))
 		if stdin_tempfile then
-			configure_stdin_buf(stdin_tempfile)
+			stdin_bufnr = configure_stdin_buf(stdin_tempfile)
 		end
 		vim.cmd('vertical all')
 		if cli_args.diff then
@@ -119,31 +124,37 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 
 	local group = vim.api.nvim_create_augroup("tele_" .. child_chan, { clear = false })
 
-	local bufs = vim.iter(files):map(vim.fn.bufnr):totable()
+	local bufs = vim.tbl_map(function(file)
+		-- XXX: if there was any problem getting stdin_bufnr, we still try with
+		-- the temp name
+		return file == stdin_tempfile and stdin_bufnr or vim.fn.bufnr(file)
+	end, files)
 
 	for _, buf in ipairs(bufs) do
 		-- TODO: not reliable: if buffer is open in another window, this will close that one.
 		-- Probably better to set winfixbuf and watch for window close (still need to handle buffer switching since
 		-- :edit! file ignores winfixbuf)
-		vim.bo[buf].bufhidden = "wipe"
-		vim.api.nvim_create_autocmd("BufWipeout", {
-			group = group,
-			buffer = buf,
-			once = true,
-			callback = function()
-				local idx = list_index(bufs, buf)
-				if idx then
-					table.remove(bufs, idx)
-					vim.rpcnotify(child_chan, "nvim_echo", {
-						{ string.format('closed %s. %d files left', vim.fn.bufname(buf), #bufs) },
-					})
+		if vim.api.nvim_buf_is_valid(buf) then
+			vim.bo[buf].bufhidden = "wipe"
+			vim.api.nvim_create_autocmd("BufWipeout", {
+				group = group,
+				buffer = buf,
+				once = true,
+				callback = function()
+					local idx = list_index(bufs, buf)
+					if idx then
+						table.remove(bufs, idx)
+						vim.rpcnotify(child_chan, "nvim_echo", {
+							{ string.format('closed %s. %d files left', vim.fn.bufname(buf), #bufs) },
+						})
+					end
+					if #bufs == 0 then
+						on_parent_done(child_chan)
+						vim.api.nvim_del_augroup_by_id(group)
+					end
 				end
-				if #bufs == 0 then
-					on_parent_done(child_chan)
-					vim.api.nvim_del_augroup_by_id(group)
-				end
-			end
-		})
+			})
+		end
 	end
 
 	vim.api.nvim_exec_autocmds("User", {
