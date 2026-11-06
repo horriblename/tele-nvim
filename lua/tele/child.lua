@@ -19,6 +19,9 @@ local defaultAttachParentOpt = {
 	defer_vim_enter = true,
 }
 
+---@type boolean?
+M.did_attach = nil
+
 -- CLI flags that take the next arg as value.
 -- Some flags have optional args, which I have not handled
 local kv_flags = {
@@ -125,6 +128,11 @@ function M.try_attach_parent(opt)
 end
 
 function M._attach_parent(chan, opt)
+	if M.did_attach then
+		vim.notify("tele-nvim: try_attach_parent() called twice", vim.log.levels.ERROR)
+		return
+	end
+	M.did_attach = true
 	local args = { unpack(vim.v.argv, 2) }
 	local client_sock = vim.v.servername
 	vim.cmd('0,$argdelete') -- clear args as it may prevent clean shutdown
