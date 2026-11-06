@@ -1,7 +1,10 @@
 local M = {}
 
 ---@class tele.AttachParentOpt
----@field wait boolean if false, exit client nvim session immediately after successfully attaching to parent. Analogous to --remote-wait (default true)
+---@field wait boolean? if false, exit client nvim session immediately after
+---successfully attaching to parent. Analogous to --remote-wait (default true)
+---@field defer_vim_enter boolean? (default true) wait until VimEnter before
+---actually attaching. Required for passing stdin properly
 
 ---@class tele.ParsedFlags {}
 ---@field commands string[]
@@ -13,6 +16,7 @@ local M = {}
 
 local defaultAttachParentOpt = {
 	wait = true,
+	defer_vim_enter = true,
 }
 
 -- CLI flags that take the next arg as value.
@@ -90,13 +94,12 @@ M.parse_cli_flags = parse_cli_flags
 ---@return boolean attached_parent, string? error
 function M.try_attach_parent(opt)
 	opt = vim.tbl_deep_extend("force", defaultAttachParentOpt, opt or {})
-	local args = { unpack(vim.v.argv, 2) }
 	local addr = vim.env.NVIM or os.getenv("NVIM_LISTEN_ADDRESS")
 	if not addr or addr == "" then
 		return false
 	end
 
-	if #args == 0 then
+	if #vim.v.argv == 1 then
 		return false
 	end
 
@@ -105,8 +108,25 @@ function M.try_attach_parent(opt)
 	if chan == 0 then
 		return false, "could not connect to parent socket " .. addr
 	end
-	local client_sock = vim.v.servername
 
+	if not opt.defer_vim_enter or vim.v.vim_did_enter then
+		M._attach_parent(chan, opt)
+	else
+		local augroup = vim.api.nvim_create_augroup("tele_vim_enter", { clear = true })
+		vim.api.nvim_create_autocmd({ "VimEnter" }, {
+			once = true,
+			group = augroup,
+			callback = function()
+				M._attach_parent(chan, opt)
+			end
+		})
+	end
+	return true
+end
+
+function M._attach_parent(chan, opt)
+	local args = { unpack(vim.v.argv, 2) }
+	local client_sock = vim.v.servername
 	vim.cmd('0,$argdelete') -- clear args as it may prevent clean shutdown
 	-- TODO: support tcp socket?
 	local sanitized_args = sanitize_args_for_call(args)
@@ -130,8 +150,6 @@ function M.try_attach_parent(opt)
 	else
 		os.exit(0)
 	end
-	return true
 end
 
 return M
-
