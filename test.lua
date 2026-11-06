@@ -127,6 +127,61 @@ check("child exits when parent closes the file", code == 0, "exit code " .. code
 
 vim.fn.delete(tmp, "rf")
 
+-- stdin handling: pipe content into a child nvim
+local tmp2 = vim.fn.tempname()
+vim.fn.mkdir(tmp2, "p")
+local init2 = tmp2 .. "/init.lua"
+vim.fn.writefile({
+	("vim.opt.runtimepath:prepend(%q)"):format(repo),
+	'vim.cmd("runtime plugin/tele.lua")',
+}, init2)
+
+vim.cmd("botright new")
+local term_buf2 = vim.api.nvim_get_current_buf()
+local wins_before2 = #vim.api.nvim_list_wins()
+local job2 = vim.fn.jobstart({ "sh", "-c", "printf 'some stdin content\\n' | nvim -u " .. init2 .. " -i NONE -n +TeleRemoteWait -" }, { term = true })
+
+check("stdin: child nvim started", job2 > 0, "job id " .. job2)
+
+local function find_stdin_buf()
+	for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+		if vim.api.nvim_buf_is_loaded(buf) then
+			local name = vim.api.nvim_buf_get_name(buf)
+			local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+			local content = table.concat(lines, "\n")
+			if name == "" and content:find("some stdin content", 1, true) and vim.bo[buf].modified then
+				return buf
+			end
+		end
+	end
+end
+
+local stdin_buf = wait_for("stdin: parent to open stdin", find_stdin_buf)
+if not stdin_buf then
+	log("  child session said:")
+	for _, line in ipairs(vim.api.nvim_buf_get_lines(term_buf2, 0, -1, false)) do
+		log("    | %s", line:gsub("%s+$", ""))
+	end
+	vim.cmd("cquit!")
+end
+
+check("stdin: buffer opened", true, "buf " .. stdin_buf)
+check("stdin: buffer unnamed", vim.api.nvim_buf_get_name(stdin_buf) == "", "name=" .. vim.api.nvim_buf_get_name(stdin_buf))
+check("stdin: buffer modified", vim.bo[stdin_buf].modified == true)
+check("stdin: buffer content", vim.api.nvim_buf_get_lines(stdin_buf, 0, 1, false)[1] == "some stdin content")
+check(
+	"stdin: opened in a new window",
+	#vim.api.nvim_list_wins() == wins_before2 + 1,
+	"wins=" .. #vim.api.nvim_list_wins() .. " (was " .. wins_before2 .. ")"
+)
+
+vim.api.nvim_buf_delete(stdin_buf, { force = true })
+
+local code2 = vim.fn.jobwait({ job2 }, 5000)[1]
+check("stdin: child exits when parent closes the file", code2 == 0, "exit code " .. code2)
+
+vim.fn.delete(tmp2, "rf")
+
 if failures > 0 then
 	log("%d check(s) failed", failures)
 	vim.cmd("cquit!")
