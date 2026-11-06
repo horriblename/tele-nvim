@@ -54,17 +54,12 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 		table.insert(cli_args.files, "-")
 	end
 
-	--- true means stdin
 	---@type string[]
 	local files = cli_args.files
 	for i, f in ipairs(files) do
 		if f == "-" then
 			files[i] = stdin_tempfile
 		end
-	end
-
-	if not args_has_stdin then
-		table.insert(files, stdin_tempfile)
 	end
 
 	---@type integer?
@@ -86,9 +81,6 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 				col = 1,
 				width = win_conf.width,
 				height = win_conf.height,
-				title = files[1] == stdin_tempfile
-					and "stdin"
-					or vim.fn.fnamemodify(files[1], ":."),
 				border = 'rounded',
 			})
 		else
