@@ -12,6 +12,15 @@ local function list_index(list, item)
 	end
 end
 
+---@param stdin_tempfile  string
+local function configure_stdin_buf(stdin_tempfile)
+	local buf = vim.fn.bufnr(stdin_tempfile)
+	if buf ~= -1 then
+		vim.api.nvim_buf_set_name(buf, "")
+		vim.bo[buf].modified = true
+	end
+end
+
 local function on_parent_done(child_chan)
 	pcall(function()
 		vim.rpcnotify(child_chan, "nvim_command", "quitall")
@@ -28,12 +37,34 @@ local function on_parent_done(child_chan)
 	})
 end
 
+---@param sock_mode string
+---@param child_sock string
+---@param cli_args tele.AttachParentCliArgs
 function M.parent_open_files(sock_mode, child_sock, cli_args)
 	local child_chan = vim.fn.sockconnect(sock_mode, child_sock, { rpc = true })
 	if child_chan == 0 then
 		error("could not connect to child socket " .. child_sock)
 	end
-	local nfiles = #cli_args.files
+	local stdin_tempfile = cli_args.stdin_tempfile
+	local args_has_stdin = vim.list_contains(cli_args.files, "-")
+	if stdin_tempfile ~= nil and not args_has_stdin then
+		table.insert(cli_args.files, "-")
+	end
+
+	--- true means stdin
+	---@type string[]
+	local files = cli_args.files
+	for i, f in ipairs(files) do
+		if f == "-" then
+			files[i] = stdin_tempfile
+		end
+	end
+
+	if not args_has_stdin then
+		table.insert(files, stdin_tempfile)
+	end
+
+	local nfiles = #files
 	if nfiles == 0 then
 		for _, cmd in ipairs(cli_args.commands) do
 			vim.cmd(cmd)
@@ -50,14 +81,19 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 				col = 1,
 				width = win_conf.width,
 				height = win_conf.height,
-				title = vim.fn.fnamemodify(cli_args.files[1], ":."),
+				title = files[1] == stdin_tempfile
+					and "stdin"
+					or vim.fn.fnamemodify(files[1], ":."),
 				border = 'rounded',
 			})
 		else
 			local h = vim.fn.winheight(0)
 			vim.cmd(h - 1 .. "split")
 		end
-		vim.cmd.edit(unpack(cli_args.files))
+		vim.cmd.edit(unpack(files))
+		if stdin_tempfile then
+			configure_stdin_buf(stdin_tempfile)
+		end
 		if cli_args.diff then
 			vim.cmd("diffthis")
 		end
@@ -66,7 +102,10 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 		end
 	else
 		vim.cmd.tabnew()
-		vim.cmd.args(unpack(cli_args.files))
+		vim.cmd.args(unpack(files))
+		if stdin_tempfile then
+			configure_stdin_buf(stdin_tempfile)
+		end
 		vim.cmd('vertical all')
 		if cli_args.diff then
 			for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
@@ -80,7 +119,7 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 
 	local group = vim.api.nvim_create_augroup("tele_" .. child_chan, { clear = false })
 
-	local bufs = vim.iter(cli_args.files):map(vim.fn.bufnr):totable()
+	local bufs = vim.iter(files):map(vim.fn.bufnr):totable()
 
 	for _, buf in ipairs(bufs) do
 		-- TODO: not reliable: if buffer is open in another window, this will close that one.
@@ -116,4 +155,3 @@ function M.parent_open_files(sock_mode, child_sock, cli_args)
 end
 
 return M
-

@@ -3,6 +3,14 @@ local M = {}
 ---@class tele.AttachParentOpt
 ---@field wait boolean if false, exit client nvim session immediately after successfully attaching to parent. Analogous to --remote-wait (default true)
 
+---@class tele.ParsedFlags {}
+---@field commands string[]
+---@field files string[]
+---@field diff boolean
+
+---@class tele.AttachParentCliArgs : tele.ParsedFlags
+---@field stdin_tempfile string?
+
 local defaultAttachParentOpt = {
 	wait = true,
 }
@@ -35,6 +43,8 @@ local function sanitize_args_for_call(args)
 	for i, arg in ipairs(args) do
 		if skipnext then
 			skipnext = false
+		elseif arg == "-" then
+			table.insert(filtered, arg)
 		elseif arg == "--" then
 			table.insert(filtered, "--")
 			for j = i + 1, #args do
@@ -100,7 +110,12 @@ function M.try_attach_parent(opt)
 	vim.cmd('0,$argdelete') -- clear args as it may prevent clean shutdown
 	-- TODO: support tcp socket?
 	local sanitized_args = sanitize_args_for_call(args)
+	---@type tele.AttachParentCliArgs
 	local cli_args = parse_cli_flags(sanitized_args)
+	local stdin_tempfile = _G.tele_stdin_tempfile
+	if stdin_tempfile ~= nil then
+		cli_args.stdin_tempfile = stdin_tempfile
+	end
 	vim.rpcrequest(chan, "nvim_exec_lua", "require('tele.parent').parent_open_files(...)",
 		{ "pipe", client_sock, cli_args })
 	if opt.wait then
@@ -119,3 +134,4 @@ function M.try_attach_parent(opt)
 end
 
 return M
+
