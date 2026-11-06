@@ -13,6 +13,7 @@
 local repo = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
 local failures = 0
 
+-- Make sure the NVIM from env does not affect us
 vim.fn.setenv("NVIM", vim.v.null)
 
 local function log(fmt, ...)
@@ -36,18 +37,14 @@ local function check(name, ok, detail)
 	return ok
 end
 
-local function fail(name, detail)
-	check(name, false, detail)
-end
-
 ---@return boolean ok, vim.api.keyset.create_autocmd.callback_args
 local function await_event(event, pattern, timeout_ms)
 	timeout_ms = timeout_ms or 2000
 	local co = assert(coroutine.running())
 	local timer ---@type uv.uv_timer_t
 	local au = vim.api.nvim_create_autocmd(event, {
-		pattern = pattern,
-		once = true,
+		pattern  = pattern,
+		once     = true,
 		-- vim.schedule works around possible nested autocmd issues
 		callback = vim.schedule_wrap(function(args)
 			timer:stop()
@@ -137,7 +134,7 @@ tests[#tests + 1] = function()
 
 	-- tele sets bufhidden=wipe and quits the child once the last file goes away
 	vim.api.nvim_buf_delete(vim.fn.bufnr(file), { force = true })
-	vim.cmd.redraw()
+
 	log("blocking until child exits")
 	local code = vim.fn.jobwait({ job }, 2000)[1]
 	check("child exits when parent closes the file", code == 0, "exit code " .. code)
@@ -173,21 +170,54 @@ tests[#tests + 1] = function()
 	)
 
 	vim.api.nvim_buf_delete(stdin_buf, { force = true })
-	vim.cmd.redraw()
+
 	log("blocking until child exits")
 	local code2 = vim.fn.jobwait({ job2 }, 2000)[1]
-	if code2 == -1 then
-		fail("stdin: timed out waiting for child to exit")
-	else
-		check("stdin: child exits when parent closes the file", code2 == 0, "exit code " .. code2)
+	check("stdin: child exits when parent closes the file", code2 == 0, "exit code " .. code2)
+end
+
+-- manpager: ensure `man` works when nvim is used as MANPAGER
+tests[#tests + 1] = function()
+	vim.cmd("only!")
+	vim.cmd("bdelete!")
+	local nvim_cmd = table.concat(base_child_cmd, " ") .. " +TeleRemoteWait +Man! -"
+	local man_job = vim.fn.jobstart(
+		{ "man", "echo" },
+		{
+			env = { MANPAGER = nvim_cmd },
+			term = true,
+		})
+	check("manpager: job started", man_job > 0, "job id " .. man_job)
+
+	local ok, ev = await_event("User", "TeleOpened", 2000)
+	assert(ok, "error waiting for TeleOpened: " .. vim.inspect(ev))
+	assert(ev.data, "autocmd TeleOpened missing event.data")
+	assert(ev.data.bufs, "autocmd TeleOpened missing event.data.bufs")
+
+	check("manpager: TeleOpened event.data.bufs", #ev.data.bufs == 1,
+		"expected 1 buffer, got: " .. vim.inspect(ev.data.bufs))
+
+	local man_buf = ev.data.bufs[1]
+	local function man_term_shows(needle)
+		local lines = vim.api.nvim_buf_get_lines(man_buf, 0, -1, false)
+		return table.concat(lines, "\n"):find(needle, 1, true) ~= nil
 	end
+
+	check("manpager: shows ECHO", man_term_shows("ECHO"), "")
+	vim.api.nvim_buf_delete(man_buf, { force = true })
+
+	log("blocking until child exits")
+	local man_code = vim.fn.jobwait({ man_job }, 5000)[1]
+	check("manpager: exits cleanly", man_code == 0, "exit code " .. man_code)
 end
 
 local main = coroutine.create(function()
+	local start = vim.fn.reltime()
 	for _, test in ipairs(tests) do
 		test()
 	end
 
+	log("\nElapsed: %.3fms", vim.fn.reltimefloat(vim.fn.reltime(start)) * 1000)
 	if failures > 0 then
 		log("%d check(s) failed", failures)
 		if headless then
