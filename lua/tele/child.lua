@@ -112,7 +112,7 @@ function M.try_attach_parent(opt)
 		return false, "could not connect to parent socket " .. addr
 	end
 
-	if not opt.defer_vim_enter or vim.v.vim_did_enter then
+	if not opt.defer_vim_enter or vim.v.vim_did_enter == 1 then
 		M._attach_parent(chan, opt)
 	else
 		local augroup = vim.api.nvim_create_augroup("tele_vim_enter", { clear = true })
